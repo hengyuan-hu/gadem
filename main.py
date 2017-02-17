@@ -12,6 +12,7 @@ import torchvision.transforms as transforms
 import torchvision.utils as vutils
 from torch.autograd import Variable
 import os
+import numpy as np
 
 import models.dcgan as dcgan
 import models.mlp as mlp
@@ -20,12 +21,12 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', required=True, help='cifar10 | lsun | imagenet | folder | lfw ')
 parser.add_argument('--dataroot', required=True, help='path to dataset')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=2)
-parser.add_argument('--batchSize', type=int, default=64, help='input batch size')
+parser.add_argument('--batchSize', type=int, default=100, help='input batch size')
 parser.add_argument('--imageSize', type=int, default=64, help='the height / width of the input image to network')
 parser.add_argument('--nz', type=int, default=100, help='size of the latent z vector')
 parser.add_argument('--ngf', type=int, default=64)
 parser.add_argument('--ndf', type=int, default=64)
-parser.add_argument('--niter', type=int, default=25, help='number of epochs to train for')
+parser.add_argument('--nepoch', type=int, default=1000, help='number of epochs to train for')
 parser.add_argument('--lrD', type=float, default=0.00005, help='learning rate for Critic, default=0.00005')
 parser.add_argument('--lrG', type=float, default=0.00005, help='learning rate for Generator, default=0.00005')
 parser.add_argument('--beta1', type=float, default=0.5, help='beta1 for adam. default=0.5')
@@ -33,9 +34,9 @@ parser.add_argument('--cuda'  , action='store_true', help='enables cuda')
 parser.add_argument('--ngpu'  , type=int, default=1, help='number of GPUs to use')
 parser.add_argument('--netG', default='', help="path to netG (to continue training)")
 parser.add_argument('--netD', default='', help="path to netD (to continue training)")
-parser.add_argument('--clamp_lower', type=float, default=-0.01)
-parser.add_argument('--clamp_upper', type=float, default=0.01)
-parser.add_argument('--Diters', type=int, default=5, help='number of D iters per each G iter')
+# parser.add_argument('--clamp_lower', type=float, default=-0.01)
+# parser.add_argument('--clamp_upper', type=float, default=0.01)
+# parser.add_argument('--Diters', type=int, default=5, help='number of D iters per each G iter')
 parser.add_argument('--noBN', action='store_true', help='use batchnorm or not (only for DCGAN)')
 parser.add_argument('--mlp_G', action='store_true', help='use MLP for G')
 parser.add_argument('--mlp_D', action='store_true', help='use MLP for D')
@@ -151,75 +152,68 @@ else:
     optimizerD = optim.RMSprop(netD.parameters(), lr = opt.lrD)
     optimizerG = optim.RMSprop(netG.parameters(), lr = opt.lrG)
 
-gen_iterations = 0
-for epoch in range(opt.niter):
+
+loss_d = np.zeros(len(dataloader))
+loss_g = np.zeros(len(dataloader))
+fe_d_real = np.zeros(len(dataloader))
+fe_d_fake = np.zeros(len(dataloader))
+
+for epoch in range(opt.nepoch):
     data_iter = iter(dataloader)
-    i = 0
-    while i < len(dataloader):
-        ############################
-        # (1) Update D network
-        ###########################
-        for p in netD.parameters(): # reset requires_grad
-            p.requires_grad = True # they are set to False below in netG update
+    for b in range(len(dataloader)):
+        pcd_k = 5
 
-        # train the discriminator Diters times
-        if gen_iterations < 25 or gen_iterations % 500 == 0:
-            Diters = 100
-        else:
-            Diters = opt.Diters
-        j = 0
-        while j < Diters and i < len(dataloader):
-            j += 1
-
-            # clamp parameters to a cube
-            for p in netD.parameters():
-                p.data.clamp_(opt.clamp_lower, opt.clamp_upper)
-
-            data = data_iter.next()
-            i += 1
-
-            # train with real
-            real_cpu, _ = data
-            netD.zero_grad()
-            batch_size = real_cpu.size(0)
-            input.data.resize_(real_cpu.size()).copy_(real_cpu)
-
-            errD_real = netD(input)
-            errD_real.backward(one)
-
-            # train with fake
-            noise.data.resize_(batch_size, nz, 1, 1)
-            noise.data.normal_(0, 1)
-            fake = netG(noise)
-            input.data.copy_(fake.data)
-            errD_fake = netD(input)
-            errD_fake.backward(mone)
-            errD = errD_real - errD_fake
-            optimizerD.step()
-
-        ############################
-        # (2) Update G network
-        ###########################
+        # update G network, draw samples
         for p in netD.parameters():
             p.requires_grad = False # to avoid computation
-        netG.zero_grad()
-        # in case our last batch was the tail batch of the dataloader,
-        # make sure we feed a full batch of noise
-        noise.data.resize_(opt.batchSize, nz, 1, 1)
+
+        for _ in range(pcd_k):
+            netG.zero_grad()
+            # in case our last batch was the tail batch of the dataloader,
+            # make sure we feed a full batch of noise
+            noise.data.resize_(opt.batchSize, nz, 1, 1)
+            noise.data.normal_(0, 1)
+            fake = netG(noise)
+            errG = netD(fake)
+            errG.backward(one)
+            optimizerG.step()
+        loss_g[b] = errG.data[0]
+
+        # update D network, constrastive bp
+        for p in netD.parameters(): # reset requires_grad
+            p.requires_grad = True # they are set to False in netG update
+
+        data = data_iter.next()
+        # train with real
+        real_cpu, _ = data
+        netD.zero_grad()
+        batch_size = real_cpu.size(0)
+        input.data.resize_(real_cpu.size()).copy_(real_cpu)
+
+        errD_real = netD(input)
+        errD_real.backward(one)
+
+        # train with fake
+        noise.data.resize_(batch_size, nz, 1, 1)
         noise.data.normal_(0, 1)
         fake = netG(noise)
-        errG = netD(fake)
-        errG.backward(one)
-        optimizerG.step()
-        gen_iterations += 1
+        input.data.copy_(fake.data)
+        errD_fake = netD(input)
+        errD_fake.backward(mone)
+        errD = errD_real - errD_fake
+        optimizerD.step()
 
-        print('[%d/%d][%d/%d] Loss_D: %f Loss_G: %f Loss_D_real: %f Loss_D_fake %f'
-            % (epoch, opt.niter, gen_iterations, len(dataloader),
-            errD.data[0], errG.data[0], errD_real.data[0], errD_fake.data[0]))
-        if gen_iterations % 500 == 0:
-            vutils.save_image(real_cpu, '{0}/real_samples.png'.format(opt.experiment))
-            fake = netG(fixed_noise)
-            vutils.save_image(fake.data, '{0}/fake_samples_{1}.png'.format(opt.experiment, gen_iterations))
+        loss_d[b] = errD.data[0]
+        fe_d_real[b] = errD_real.data[0]
+        fe_d_fake[b] = errD_fake.data[0]
+
+    print('[%d/%d] Loss_D: %f Loss_G: %f Loss_D_real: %f Loss_D_fake %f'
+          % (epoch, opt.nepoch, loss_d.mean(), loss_g.mean(),
+             fe_d_real.mean(), fe_d_fake.mean()))
+    # save samples
+    fake = netG(fixed_noise)
+    vutils.save_image(
+        fake.data, '{0}/fake_samples_{1}.png'.format(opt.experiment, epoch), nrow=10)
 
     # do checkpointing
     # torch.save(netG.state_dict(), '{0}/netG_epoch_{1}.pth'.format(opt.experiment, epoch))
