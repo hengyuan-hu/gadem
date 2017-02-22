@@ -157,24 +157,38 @@ loss_d = np.zeros(len(dataloader))
 loss_g = np.zeros(len(dataloader))
 fe_d_real = np.zeros(len(dataloader))
 fe_d_fake = np.zeros(len(dataloader))
+cd_steps =  np.zeros(len(dataloader))
+
+log_file = open(os.path.join(opt.experiment, 'log.txt'), 'w')
+pcd_k = 25
+
+noise.data.resize_(opt.batchSize, nz, 1, 1)
 
 for epoch in range(opt.nepoch):
     data_iter = iter(dataloader)
     for b in range(len(dataloader)):
-        pcd_k = 5
+
+        # train with real
+        real_cpu, _ = data_iter.next()
+        netD.zero_grad()
+        # batch_size = real_cpu.size(0)
+        input.data.resize_(real_cpu.size()).copy_(real_cpu)
+        errD_real = netD(input)
+        errD_real.backward(one)
 
         # update G network, draw samples
         for p in netD.parameters():
             p.requires_grad = False # to avoid computation
 
-        for _ in range(pcd_k):
+        noise.data.normal_(0, 1)
+        cd_steps[b] = pcd_k
+        for i in range(pcd_k):
             netG.zero_grad()
-            # in case our last batch was the tail batch of the dataloader,
-            # make sure we feed a full batch of noise
-            noise.data.resize_(opt.batchSize, nz, 1, 1)
-            noise.data.normal_(0, 1)
             fake = netG(noise)
             errG = netD(fake)
+            if errG.data[0] < errD_real.data[0]:
+                cd_steps[b] = i
+                break
             errG.backward(one)
             optimizerG.step()
         loss_g[b] = errG.data[0]
@@ -183,19 +197,9 @@ for epoch in range(opt.nepoch):
         for p in netD.parameters(): # reset requires_grad
             p.requires_grad = True # they are set to False in netG update
 
-        data = data_iter.next()
-        # train with real
-        real_cpu, _ = data
-        netD.zero_grad()
-        batch_size = real_cpu.size(0)
-        input.data.resize_(real_cpu.size()).copy_(real_cpu)
-
-        errD_real = netD(input)
-        errD_real.backward(one)
-
         # train with fake
-        noise.data.resize_(batch_size, nz, 1, 1)
-        noise.data.normal_(0, 1)
+        # noise.data.resize_(batch_size, nz, 1, 1)
+        # noise.data.normal_(0, 1)
         fake = netG(noise)
         input.data.copy_(fake.data)
         errD_fake = netD(input)
@@ -207,14 +211,18 @@ for epoch in range(opt.nepoch):
         fe_d_real[b] = errD_real.data[0]
         fe_d_fake[b] = errD_fake.data[0]
 
-    print('[%d/%d] Loss_D: %f Loss_G: %f Loss_D_real: %f Loss_D_fake %f'
-          % (epoch, opt.nepoch, loss_d.mean(), loss_g.mean(),
-             fe_d_real.mean(), fe_d_fake.mean()))
+    log = '[%d/%d] Loss_D: %f Loss_G: %f Loss_D_real: %f Loss_D_fake %f, cd_mean: %f' \
+          % (epoch+1, opt.nepoch, loss_d.mean(), loss_g.mean(),
+             fe_d_real.mean(), fe_d_fake.mean(), cd_steps.mean())
+    print(log)
+    log_file.write(log+'\n')
+    log_file.flush()
     # save samples
     fake = netG(fixed_noise)
     vutils.save_image(
         fake.data, '{0}/fake_samples_{1}.png'.format(opt.experiment, epoch), nrow=10)
 
     # do checkpointing
-    # torch.save(netG.state_dict(), '{0}/netG_epoch_{1}.pth'.format(opt.experiment, epoch))
-    # torch.save(netD.state_dict(), '{0}/netD_epoch_{1}.pth'.format(opt.experiment, epoch))
+    if (epoch+1) % 5 == 0:
+        torch.save(netG.state_dict(), '{0}/netG_epoch_{1}.pth'.format(opt.experiment, epoch+1))
+        torch.save(netD.state_dict(), '{0}/netD_epoch_{1}.pth'.format(opt.experiment, epoch+1))
