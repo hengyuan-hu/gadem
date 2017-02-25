@@ -192,6 +192,8 @@ for epoch in range(opt.nepoch):
             errG.backward(one)
             optimizerG.step()
         loss_g[b] = errG.data[0]
+        # vutils.save_image(
+        #     fake.data, '{0}/neg_chain_{1}.png'.format(opt.experiment, b), nrow=10)
 
         # update D network, constrastive bp
         for p in netD.parameters(): # reset requires_grad
