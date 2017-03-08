@@ -167,7 +167,6 @@ noise.data.resize_(opt.batchSize, nz, 1, 1)
 for epoch in range(opt.nepoch):
     data_iter = iter(dataloader)
     for b in range(len(dataloader)):
-
         # train with real
         real_cpu, _ = data_iter.next()
         netD.zero_grad()
@@ -187,11 +186,16 @@ for epoch in range(opt.nepoch):
             fake = netG(noise)
             errG = netD(fake)
             if errG.data[0] < errD_real.data[0]:
+                # print(i)
+                # print('real energy: %s, fake energy %s' %
+                #       (errG.data[0], errD_real.data[0]))
                 cd_steps[b] = i
                 break
             errG.backward(one)
             optimizerG.step()
         loss_g[b] = errG.data[0]
+
+        # print(i)
         # vutils.save_image(
         #     fake.data, '{0}/neg_chain_{1}.png'.format(opt.experiment, b), nrow=10)
 
@@ -226,5 +230,7 @@ for epoch in range(opt.nepoch):
 
     # do checkpointing
     if (epoch+1) % 5 == 0:
-        torch.save(netG.state_dict(), '{0}/netG_epoch_{1}.pth'.format(opt.experiment, epoch+1))
-        torch.save(netD.state_dict(), '{0}/netD_epoch_{1}.pth'.format(opt.experiment, epoch+1))
+        torch.save(netG.state_dict(),
+                   '{0}/netG_epoch_{1}.pth'.format(opt.experiment, epoch+1))
+        torch.save(netD.state_dict(),
+                   '{0}/netD_epoch_{1}.pth'.format(opt.experiment, epoch+1))
