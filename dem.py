@@ -14,32 +14,22 @@ import torch_utils
 
 def append_adversarial_x(x_cpu, net_f, eps):
     # TODO: assert net_f gradient should be zero before entering
-    utils.assert_eq(type(x_cpu), torch.FloatTensor)
-    x_gpu = x_cpu.cuda()
-    x = Variable(x_gpu, requires_grad=True)
+    # utils.assert_eq(type(x_cpu), torch.FloatTensor)
+    # x_gpu = x_cpu.cuda()
+
+    x = Variable(x_cpu.cuda(), requires_grad=True)
     fe = net_f(x)
-    # print('free energy of original x:', fe.data[0])
     fe.backward()
     scaled_grad_sign = torch.sign(x.grad.data) * eps
     adv_x = x.data + scaled_grad_sign
     adv_x.clamp_(-1.0, 1.0)
-    # print('==== after generating adv examples ====')
-    # print('free energy of original x:', net_f(x).data[0])
-    # print('free energy of adv x:', net_f(Variable(adv_x)).data[0])
-    # print('type of x.data:', type(x.data))
-    ret = torch.cat((x_gpu, adv_x))
-    # print('shape of combined tensor:', ret.size())
-    # vutils.save_image(
-    #     x.data, 'tests/eps_%s_normal.png' % eps, nrow=10)
-    # vutils.save_image(
-    #     adv_x, 'tests/eps_%s_adversa.png' % eps, nrow=10)
+    ret = torch.cat((x.data, adv_x))
     return ret
 
 
 class DEM(object):
     def __init__(self, net_f):
         self.net_f = net_f
-        # self.dataset = dataset
 
     def train(self, configs, dataset, sampler):
         optimizer = torch.optim.RMSprop(self.net_f.parameters(), lr=configs.lr_f)
@@ -49,14 +39,8 @@ class DEM(object):
         pcd_steps = np.zeros(len(dataset))
         log_file = open(os.path.join(configs.experiment, 'log_f.txt'), 'w')
 
-        # cuda variables and tensors
         x_node = torch_utils.create_cuda_variable(
             (configs.batch_size,) + dataset.x_shape)
-        # fixed_noise = torch.FloatTensor(
-        #     configs.batch_size, configs.num_z, 1, 1).normal_(0, 1).cuda()
-        # one = torch.FloatTensor([1]).cuda()
-        # mone = one * -1
-
         for eid in range(configs.num_epochs):
             dataloader = iter(dataset)
             t = time.time()

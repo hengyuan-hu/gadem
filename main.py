@@ -45,6 +45,8 @@ parser.add_argument('--lr_g', type=float, default=0.00005,
 parser.add_argument('--ngpu'  , type=int, default=1, help='number of GPUs to use')
 parser.add_argument('--net_g', default='', help="path to net_g (to continue training)")
 parser.add_argument('--net_f', default='', help="path to net_f (to continue training)")
+parser.add_argument('--use_adversarial_real', action='store_true',
+                    help='use adv examples')
 parser.add_argument('--experiment', default=None,
                     help='Where to store samples and models')
 
@@ -105,6 +107,5 @@ if __name__ == '__main__':
     sampler = Sampler(net_g, nz, opt.lr_g, opt.batch_size, dataset.x_shape)
 
     opt.pcd_k = 25
-    opt.use_adversarial_real = True
     opt.eps = 0.3
     dem.train(opt, dataset, sampler)
