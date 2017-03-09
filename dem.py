@@ -98,9 +98,9 @@ class DEM(object):
 
             if (eid+1) % 10 == 0:
                 torch.save(self.net_f.state_dict(),
-                           '%s/net_f_epoch_%s.pth' % (configs.experiment, epoch+1))
+                           '%s/net_f_epoch_%s.pth' % (configs.experiment, eid+1))
                 torch.save(sampler.net_g.state_dict(),
-                           '%s/net_g_epoch_%s.pth' % (configs.experiment, epoch+1))
+                           '%s/net_g_epoch_%s.pth' % (configs.experiment, eid+1))
 
         log_file.close()
 
