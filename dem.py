@@ -7,15 +7,23 @@ import numpy as np
 import torch
 from torch.autograd import Variable
 import torchvision.utils as vutils
+import torchvision.datasets as dset
+import torchvision.transforms as transforms
 
 import utils
 import torch_utils
 
 
+def assert_zero_grads(params):
+    for p in params:
+        utils.assert_eq(p.grad.data.sum(), 0)
+
+
 def append_adversarial_x(x_cpu, net_f, eps):
     # TODO: assert net_f gradient should be zero before entering
-    # utils.assert_eq(type(x_cpu), torch.FloatTensor)
-    # x_gpu = x_cpu.cuda()
+    # assert_zero_grads(net_f.parameters())
+    for p in net_f.parameters():
+        p.requires_grad = False
 
     x = Variable(x_cpu.cuda(), requires_grad=True)
     fe = net_f(x)
@@ -24,12 +32,30 @@ def append_adversarial_x(x_cpu, net_f, eps):
     adv_x = x.data + scaled_grad_sign
     adv_x.clamp_(-1.0, 1.0)
     ret = torch.cat((x.data, adv_x))
+    # print('x energy:', fe.data[0], 'adv_x energy:', net_f(Variable(adv_x)).data[0])
+
+    for p in net_f.parameters():
+        p.requires_grad = True
+    # assert_zero_grads(net_f.parameters())
     return ret
 
 
 class DEM(object):
     def __init__(self, net_f):
         self.net_f = net_f
+
+        dataset = dset.CIFAR10(
+            root='/home/hhu/Developer/torch-dem/cifar10', download=True,
+            transform=transforms.Compose([
+                transforms.Scale(32),
+                transforms.ToTensor(),
+                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+            ])
+        )
+        self.dataset = torch.utils.data.DataLoader(
+            dataset, batch_size=100,
+            shuffle=True, num_workers=2
+        )
 
     def train(self, configs, dataset, sampler):
         optimizer = torch.optim.RMSprop(self.net_f.parameters(), lr=configs.lr_f)
@@ -39,35 +65,41 @@ class DEM(object):
         pcd_steps = np.zeros(len(dataset))
         log_file = open(os.path.join(configs.experiment, 'log_f.txt'), 'w')
 
-        x_node = torch_utils.create_cuda_variable(
+        data_node = torch_utils.create_cuda_variable(
             (configs.batch_size,) + dataset.x_shape)
+        sample_node = torch_utils.create_cuda_variable(
+            (configs.batch_size,) + dataset.x_shape)
+
         for eid in range(configs.num_epochs):
-            dataloader = iter(dataset)
+            dataloader = iter(self.dataset)
             t = time.time()
 
             for bid in range(len(dataloader)):
                 self.net_f.zero_grad()
+                real_cpu, _ = dataloader.next()
 
-                real_cpu = dataloader.next()
-                x_node.data.resize_(real_cpu.size()).copy_(real_cpu)
+                if configs.use_adversarial_real:
+                    real_gpu = append_adversarial_x(
+                        real_cpu, self.net_f, configs.eps)
+                    # self.net_f.zero_grad() # necessary?
+                    data_node.data.resize_(real_gpu.size()).copy_(real_gpu)
+                else:
+                    data_node.data.resize_(real_cpu.size()).copy_(real_cpu)
 
-                # if configs.use_adversarial_real:
-                #     real_gpu = append_adversarial_x(
-                #         real_cpu, self.net_f, configs.eps)
-                #     self.net_f.zero_grad() # necessary?
-                #     x_node.data.resize_(real_gpu.size()).copy_(real_gpu)
-                # else:
-                #     x_node.data.resize_(real_cpu.size()).copy_(real_cpu)
-                fe_real = self.net_f(x_node)
+                fe_real = self.net_f(data_node)
 
+                # assert_zero_grads(sampler.net_g.parameters())
                 pcd_k = configs.pcd_k if eid < 25 else 100
                 samples, pcd_steps[bid] = sampler.sample(
                     self.net_f, fe_real.data[0], pcd_k)
                 utils.assert_eq(type(samples), torch.cuda.FloatTensor)
+                # assert_zero_grads(sampler.net_g.parameters())
 
-                x_node.data.resize_(samples.size()).copy_(samples)
-                fe_fake = self.net_f(x_node)
+                sample_node.data.resize_(samples.size()).copy_(samples)
+                fe_fake = self.net_f(sample_node)
                 loss_f = fe_real - fe_fake
+
+                # assert_zero_grads(self.net_f.parameters())
                 loss_f.backward()
                 optimizer.step()
 
@@ -89,7 +121,6 @@ class DEM(object):
                            '%s/net_f_epoch_%s.pth' % (configs.experiment, eid+1))
                 torch.save(sampler.net_g.state_dict(),
                            '%s/net_g_epoch_%s.pth' % (configs.experiment, eid+1))
-
         log_file.close()
 
     def eval(self, train_xs, test_xs):
@@ -115,9 +146,6 @@ class DEM(object):
 
 class Sampler(object):
     def __init__(self, net_g, num_z, lr, num_samples, x_shape):
-        # self.num_z = num_z
-        # self.lr = lr
-        # self.num_samples = num_samples
         self.net_g = net_g
         self.fix_noise = torch_utils.create_cuda_variable(
             (num_samples, num_z, 1, 1))
@@ -138,8 +166,6 @@ class Sampler(object):
             self.net_g.zero_grad()
             fake = self.net_g(self.noise)
             fe = net_f(fake)
-            # print('fake fe:', fe.data[0])
-            # print('real fe:', lower_bound)
             if fe.data[0] < lower_bound:
                 break
             fe.backward()
