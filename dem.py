@@ -44,16 +44,20 @@ class DEM(object):
         for eid in range(configs.num_epochs):
             dataloader = iter(dataset)
             t = time.time()
+
             for bid in range(len(dataloader)):
                 self.net_f.zero_grad()
 
                 real_cpu = dataloader.next()
-                if configs.use_adversarial_real:
-                    real_gpu = append_adversarial_x(real_cpu, self.net_f, configs.eps)
-                    self.net_f.zero_grad() # necessary?
-                    x_node.data.resize_(real_gpu.size()).copy_(real_gpu)
-                else:
-                    x_node.data.resize_(real_cpu.size()).copy_(real_cpu)
+                x_node.data.resize_(real_cpu.size()).copy_(real_cpu)
+
+                # if configs.use_adversarial_real:
+                #     real_gpu = append_adversarial_x(
+                #         real_cpu, self.net_f, configs.eps)
+                #     self.net_f.zero_grad() # necessary?
+                #     x_node.data.resize_(real_gpu.size()).copy_(real_gpu)
+                # else:
+                #     x_node.data.resize_(real_cpu.size()).copy_(real_cpu)
                 fe_real = self.net_f(x_node)
 
                 pcd_k = configs.pcd_k if eid < 25 else 100
@@ -95,11 +99,11 @@ class DEM(object):
         train_fes = np.zeros(len(train_xs) // batch_size)
         test_fes = np.zeros(len(test_xs) // batch_size)
 
-        x_node = torch_utils.create_cuda_variable((batch_size,) + dataset.x_shape)
-        for i in range(len(train_fes)):
+        x_node = torch_utils.create_cuda_variable((batch_size,) + train_xs.shape[1:])
+        for i in xrange(len(train_fes)):
             x_node.data.copy_(train_xs[i*batch_size : (i+1)*batch_size])
             train_fes[i] = self.net_f(x_node)
-        for i in range(len(test_fes)):
+        for i in xrange(len(test_fes)):
             x_node.data.copy_(test_xs[i*batch_size, (i+1)*batch_size])
             test_fes[i] = self.net_f(x_node)
 
@@ -144,7 +148,6 @@ class Sampler(object):
         for p in net_f.parameters():
             p.requires_grad = True
 
-        # print('type of fake: (guess: Variable)', type(fake.data))
         # TODO: LMC samples
         return fake.data, step
 

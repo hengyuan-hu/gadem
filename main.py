@@ -1,22 +1,23 @@
 from __future__ import print_function
+import os
+# import time
+
 import argparse
 import random
 import torch
-import torch.nn as nn
+# import torch.nn as nn
 # import torch.nn.parallel
 import torch.backends.cudnn as cudnn
-import torch.optim as optim
-import torch.utils.data
-import torchvision.datasets as dset
-import torchvision.transforms as transforms
-import torchvision.utils as vutils
-from torch.autograd import Variable
-import os
-import numpy as np
-import time
+# import torch.optim as optim
+# import torch.utils.data
+# import torchvision.datasets as dset
+# import torchvision.transforms as transforms
+# import torchvision.utils as vutils
+# from torch.autograd import Variable
+# import numpy as np
 
 import models.dcgan as dcgan
-import models.mlp as mlp
+# import models.mlp as mlp
 
 from dataset_wrapper import Cifar10Wrapper
 from dem import DEM, Sampler
@@ -42,9 +43,9 @@ parser.add_argument('--lr_f', type=float, default=0.00005,
                     help='learning rate for Critic, default=0.00005')
 parser.add_argument('--lr_g', type=float, default=0.00005,
                     help='learning rate for Generator, default=0.00005')
-parser.add_argument('--ngpu'  , type=int, default=1, help='number of GPUs to use')
-parser.add_argument('--net_g', default='', help="path to net_g (to continue training)")
-parser.add_argument('--net_f', default='', help="path to net_f (to continue training)")
+parser.add_argument('--ngpu', type=int, default=1, help='number of GPUs to use')
+parser.add_argument('--net_g', default='', help="path to net_g")
+parser.add_argument('--net_f', default='', help="path to net_f")
 parser.add_argument('--use_adversarial_real', action='store_true',
                     help='use adv examples')
 parser.add_argument('--experiment', default=None,
