@@ -44,18 +44,18 @@ class DEM(object):
     def __init__(self, net_f):
         self.net_f = net_f
 
-        dataset = dset.CIFAR10(
-            root='/home/hhu/Developer/torch-dem/cifar10', download=True,
-            transform=transforms.Compose([
-                transforms.Scale(32),
-                transforms.ToTensor(),
-                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-            ])
-        )
-        self.dataset = torch.utils.data.DataLoader(
-            dataset, batch_size=100,
-            shuffle=True, num_workers=2
-        )
+        # dataset = dset.CIFAR10(
+        #     root='/home/hhu/Developer/torch-dem/cifar10', download=True,
+        #     transform=transforms.Compose([
+        #         transforms.Scale(32),
+        #         transforms.ToTensor(),
+        #         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+        #     ])
+        # )
+        # self.dataset = torch.utils.data.DataLoader(
+        #     dataset, batch_size=100,
+        #     shuffle=True, num_workers=2
+        # )
 
     def train(self, configs, dataset, sampler):
         optimizer = torch.optim.RMSprop(self.net_f.parameters(), lr=configs.lr_f)
@@ -71,17 +71,16 @@ class DEM(object):
             (configs.batch_size,) + dataset.x_shape)
 
         for eid in range(configs.num_epochs):
-            dataloader = iter(self.dataset)
+            dataloader = iter(dataset)
             t = time.time()
 
             for bid in range(len(dataloader)):
                 self.net_f.zero_grad()
-                real_cpu, _ = dataloader.next()
+                real_cpu = dataloader.next()
 
                 if configs.use_adversarial_real:
                     real_gpu = append_adversarial_x(
                         real_cpu, self.net_f, configs.eps)
-                    # self.net_f.zero_grad() # necessary?
                     data_node.data.resize_(real_gpu.size()).copy_(real_gpu)
                 else:
                     data_node.data.resize_(real_cpu.size()).copy_(real_cpu)
