@@ -94,7 +94,8 @@ class DEM(object):
             print('Time Taken:', time.time() - t)
             log_file.write(log+'\n')
             log_file.flush()
-            sampler.save_samples(os.path.join(configs.experiment, 'epoch%d' % eid+1))
+            sampler.save_samples(os.path.join(configs.experiment, 'epoch%d' % (eid+1)))
+
             if (eid+1) % 10 == 0:
                 torch.save(self.net_f.state_dict(),
                            '%s/net_f_epoch_%s.pth' % (configs.experiment, epoch+1))
