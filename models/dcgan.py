@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.parallel
 
 
-class DCGAN_D(nn.Container):
+class DCGAN_D(nn.Module):
     def __init__(self, isize, nz, nc, ndf, ngpu, n_extra_layers=0):
         super(DCGAN_D, self).__init__()
         self.ngpu = ngpu
@@ -53,7 +53,7 @@ class DCGAN_D(nn.Container):
         return output.view(1)
 
 
-class DCGAN_G(nn.Container):
+class DCGAN_G(nn.Module):
     def __init__(self, isize, nz, nc, ngf, ngpu, n_extra_layers=0):
         super(DCGAN_G, self).__init__()
         self.ngpu = ngpu
@@ -107,7 +107,7 @@ class DCGAN_G(nn.Container):
 
 
 ###############################################################################
-class DCGAN_D_nobn(nn.Container):
+class DCGAN_D_nobn(nn.Module):
     def __init__(self, isize, nz, nc, ndf, ngpu, n_extra_layers=0):
         super(DCGAN_D_nobn, self).__init__()
         self.ngpu = ngpu
@@ -154,7 +154,7 @@ class DCGAN_D_nobn(nn.Container):
         return output.view(1)
 
 
-class DCGAN_G_nobn(nn.Container):
+class DCGAN_G_nobn(nn.Module):
     def __init__(self, isize, nz, nc, ngf, ngpu, n_extra_layers=0):
         super(DCGAN_G_nobn, self).__init__()
         self.ngpu = ngpu
