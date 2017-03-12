@@ -1,15 +1,11 @@
 from __future__ import print_function
 
-# import torch.nn as nn
 import os
 import time
 import numpy as np
 import torch
 from torch.autograd import Variable
 import torchvision.utils as vutils
-import torchvision.datasets as dset
-import torchvision.transforms as transforms
-
 import utils
 import torch_utils
 
@@ -44,25 +40,16 @@ class DEM(object):
     def __init__(self, net_f):
         self.net_f = net_f
 
-        # dataset = dset.CIFAR10(
-        #     root='/home/hhu/Developer/torch-dem/cifar10', download=True,
-        #     transform=transforms.Compose([
-        #         transforms.Scale(32),
-        #         transforms.ToTensor(),
-        #         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-        #     ])
-        # )
-        # self.dataset = torch.utils.data.DataLoader(
-        #     dataset, batch_size=100,
-        #     shuffle=True, num_workers=2
-        # )
-
     def train(self, configs, dataset, sampler):
         optimizer = torch.optim.RMSprop(self.net_f.parameters(), lr=configs.lr_f)
         loss_vals = np.zeros(len(dataset))
-        fe_real_vals = np.zeros(len(dataset))
-        fe_fake_vals = np.zeros(len(dataset))
-        pcd_steps = np.zeros(len(dataset))
+        fe_pos_vals = np.zeros(len(dataset))
+        fe_neg_vals = np.zeros(len(dataset))
+        fe_g_vals = np.zeros(len(dataset))
+        fe_lmc_vals = np.zeros(len(dataset))
+        g_steps = np.zeros(len(dataset))
+        lmc_steps = np.zeros(len(dataset))
+
         log_file = open(os.path.join(configs.experiment, 'log_f.txt'), 'w')
 
         data_node = torch_utils.create_cuda_variable(
@@ -76,44 +63,52 @@ class DEM(object):
 
             for bid in range(len(dataloader)):
                 self.net_f.zero_grad()
-                real_cpu = dataloader.next()
+                pos_cpu = dataloader.next()
 
-                if configs.use_adversarial_real:
-                    real_gpu = append_adversarial_x(
-                        real_cpu, self.net_f, configs.eps)
-                    data_node.data.resize_(real_gpu.size()).copy_(real_gpu)
+                if configs.use_adv:
+                    pos_gpu = append_adversarial_x(
+                        pos_cpu, self.net_f, configs.adv_eps)
+                    data_node.data.resize_(pos_gpu.size()).copy_(pos_gpu)
                 else:
-                    data_node.data.resize_(real_cpu.size()).copy_(real_cpu)
+                    data_node.data.resize_(pos_cpu.size()).copy_(pos_cpu)
 
-                fe_real = self.net_f(data_node)
+                fe_pos = self.net_f(data_node)
 
                 # assert_zero_grads(sampler.net_g.parameters())
                 pcd_k = configs.pcd_k if eid < 25 else 100
-                samples, pcd_steps[bid] = sampler.sample(
-                    self.net_f, fe_real.data[0], pcd_k)
+                use_lmc = eid >= 25
+                samples, infos = sampler.sample(
+                    self.net_f, fe_pos.data[0], pcd_k, use_lmc)
+
+                g_steps[bid], fe_g_vals[bid], lmc_steps[bid], fe_lmc_vals[bid] = infos
+
                 utils.assert_eq(type(samples), torch.cuda.FloatTensor)
                 # assert_zero_grads(sampler.net_g.parameters())
 
                 sample_node.data.resize_(samples.size()).copy_(samples)
-                fe_fake = self.net_f(sample_node)
-                loss_f = fe_real - fe_fake
+                fe_neg = self.net_f(sample_node)
+                loss_f = fe_pos - fe_neg
 
                 # assert_zero_grads(self.net_f.parameters())
                 loss_f.backward()
                 optimizer.step()
 
-                fe_real_vals[bid] = fe_real.data[0]
-                fe_fake_vals[bid] = fe_fake.data[0]
+                fe_pos_vals[bid] = fe_pos.data[0]
+                fe_neg_vals[bid] = fe_neg.data[0]
                 loss_vals[bid] = loss_f.data[0]
 
-            log = '[%d/%d] Loss_F: %f FE_Real: %f FE_Fake %f, PCD-K %f' \
-                  % (eid+1, configs.num_epochs, loss_vals.mean(),
-                     fe_real_vals.mean(), fe_fake_vals.mean(), pcd_steps.mean())
+            log = ('[%d/%d] Loss_F: %s FE_pos: %s, FE_neg %s, '
+                   'FE_g %s, g_steps %.1f, FE_lmc %s,  lmc_steps %.1f') \
+                   % (eid+1, configs.num_epochs,
+                      loss_vals.mean(), fe_pos_vals.mean(), fe_neg_vals.mean(),
+                      fe_g_vals.mean(), g_steps.mean(),
+                      fe_lmc_vals.mean(), lmc_steps.mean())
             print(log)
             print('Time Taken:', time.time() - t)
             log_file.write(log+'\n')
             log_file.flush()
-            sampler.save_samples(os.path.join(configs.experiment, 'epoch%d' % (eid+1)))
+            sampler.save_samples(
+                os.path.join(configs.experiment, 'epoch%d' % (eid+1)))
 
             if (eid+1) % 10 == 0:
                 torch.save(self.net_f.state_dict(),
@@ -123,6 +118,8 @@ class DEM(object):
         log_file.close()
 
     def eval(self, train_xs, test_xs):
+        # print(train_xs.shape)
+        # print(test_xs.shape)
         batch_size = 1000
         utils.assert_eq(len(train_xs) % batch_size, 0)
         utils.assert_eq(len(test_xs) % batch_size, 0)
@@ -131,52 +128,108 @@ class DEM(object):
 
         x_node = torch_utils.create_cuda_variable((batch_size,) + train_xs.shape[1:])
         for i in xrange(len(train_fes)):
-            x_node.data.copy_(train_xs[i*batch_size : (i+1)*batch_size])
-            train_fes[i] = self.net_f(x_node)
+            x_node.data.copy_(
+                torch.from_numpy(train_xs[i*batch_size : (i+1)*batch_size]))
+            train_fes[i] = self.net_f(x_node).data[0]
         for i in xrange(len(test_fes)):
-            x_node.data.copy_(test_xs[i*batch_size, (i+1)*batch_size])
-            test_fes[i] = self.net_f(x_node)
+            # print(test_xs.shape)
+            x_node.data.copy_(
+                torch.from_numpy(test_xs[i*batch_size : (i+1)*batch_size]))
+            test_fes[i] = self.net_f(x_node).data[0]
 
         mean_train_fes = train_fes.mean()
         mean_test_fes = test_fes.mean()
-        print('Eval: free_energy on train: %s, free_energy on test: %s, ratio: %s' %
+        print('Eval:\nfree_energy on train: %s;\nfree_energy on test: %s;\nratio: %s' %
               (mean_train_fes, mean_test_fes, mean_train_fes / mean_test_fes))
 
 
 class Sampler(object):
-    def __init__(self, net_g, num_z, lr, num_samples, x_shape):
+    def __init__(self, net_g, configs, x_shape):
         self.net_g = net_g
-        self.fix_noise = torch_utils.create_cuda_variable(
-            (num_samples, num_z, 1, 1))
-        self.fix_noise.data.normal_(0, 1)
-        self.noise = torch_utils.create_cuda_variable(
-            (num_samples, num_z, 1, 1))
-        self.lmc_samples = torch_utils.create_cuda_variable(
-            (num_samples,)+x_shape)
-        self.lmc_samples.data.normal_(0, 1)
-        self.optimizer = torch.optim.RMSprop(self.net_g.parameters(), lr=lr)
+        self.optimizer = torch.optim.RMSprop(self.net_g.parameters(), lr=configs.lr_g)
 
-    def sample(self, net_f, lower_bound, pcd_k):
+        z_shape = (configs.batch_size, configs.nz, 1, 1)
+        self.fix_noise = torch_utils.create_cuda_variable(z_shape)
+        self.fix_noise.data.normal_(0, 1)
+        self.noise = torch_utils.create_cuda_variable(z_shape)
+
+        samples_shape = (configs.batch_size,) + x_shape
+        self.lmc_samples = torch.FloatTensor(*samples_shape)
+        self.lmc_samples = self.lmc_samples.cuda()
+        self.lmc_samples.uniform_(-1.0, 1.0)
+
+        self.lmc_noise = torch.FloatTensor(*samples_shape)
+        self.lmc_noise = self.lmc_noise.cuda()
+
+        self.lmc_grad_scale = configs.lmc_grad_scale
+        self.lmc_noise_scale = configs.lmc_noise_scale
+
+    def sample(self, net_f, lower_bound, pcd_k, use_lmc):
         for p in net_f.parameters():
             p.requires_grad = False
+        assert net_f.training
+        net_f.eval()
 
         self.noise.data.normal_(0, 1)
-        for step in range(pcd_k):
+        for g_step in range(pcd_k):
             self.net_g.zero_grad()
             fake = self.net_g(self.noise)
-            fe = net_f(fake)
-            if fe.data[0] < lower_bound:
+            fake_fe = net_f(fake)
+            if fake_fe.data[0] < lower_bound:
                 break
-            fe.backward()
+            fake_fe.backward()
             self.optimizer.step()
+
+        if use_lmc:
+            # lmc samples
+            for lmc_step in range(pcd_k):
+                lmc_samples = Variable(self.lmc_samples, requires_grad=True)
+                lmc_fe = net_f(lmc_samples)
+                # if lmc_step % 50 == 0:
+                #     print(lmc_step, '>>>lmc fe:', lmc_fe.data[0], 'lb:', lower_bound)
+                #     print('grad scale:',
+                #           torch.min(lmc_samples.grad.data),
+                #           torch.max(lmc_samples.grad.data))
+
+                if lmc_fe.data[0] < lower_bound:
+                    break
+                lmc_fe.backward()
+
+                # if lmc_step % 50 == 0:
+                #     print('grad scale:',
+                #           torch.min(lmc_samples.grad.data),
+                #           torch.max(lmc_samples.grad.data))
+
+                self.lmc_noise.normal_(0, 1)
+                self.lmc_samples = (self.lmc_samples
+                                    - self.lmc_grad_scale * lmc_samples.grad.data
+                                    + self.lmc_noise_scale * self.lmc_noise)
+                self.lmc_samples.clamp_(-1.0, 1.0)
+
+                samples = torch.cat((fake.data, self.lmc_samples))
+                # print('----------')
+                # print('>>> samples shape:', samples.size())
+                # print('seperate energys:', fake_fe.data[0], lmc_fe.data[0])
+                # print(net_f(fake).data[0], net_f(Variable(self.lmc_samples)).data[0])
+                # print('combined:', net_f(Variable(samples)).data[0])
+                # print('==========')
+                infos = (g_step, fake_fe.data[0], lmc_step, lmc_fe.data[0])
+        else:
+            samples = fake.data
+            infos = (g_step, fake_fe.data[0], 0, 0)
 
         for p in net_f.parameters():
             p.requires_grad = True
+        net_f.train()
 
-        # TODO: LMC samples
-        return fake.data, step
+        return samples, infos
 
     def save_samples(self, prefix):
+        assert self.net_g.training
+        self.net_g.eval()
         fake = self.net_g(self.fix_noise)
+        self.net_g.train()
         vutils.save_image(
-            fake.data, '%s_fake_samples.png' % prefix, nrow=10)
+            fake.data, '%s_g_samples.png' % prefix, nrow=10)
+        vutils.save_image(
+            self.lmc_samples, '%s_lmc_samples.png' % prefix, nrow=10)
