@@ -33,6 +33,7 @@ parser.add_argument('--batch_size', type=int, default=100,
                     help='input batch size')
 parser.add_argument('--image_size', type=int, default=32,
                     help='the height / width of the input image to network')
+parser.add_argument('--nc', type=int, default=3, help='num_channel of images')
 parser.add_argument('--nz', type=int, default=100,
                     help='size of the latent z vector')
 parser.add_argument('--ngf', type=int, default=64)
@@ -43,11 +44,14 @@ parser.add_argument('--lr_f', type=float, default=0.00005,
                     help='learning rate for Critic, default=0.00005')
 parser.add_argument('--lr_g', type=float, default=0.00005,
                     help='learning rate for Generator, default=0.00005')
+parser.add_argument('--lmc_grad_scale', type=float, default=1.0)
+parser.add_argument('--lmc_noise_scale', type=float, default=0.1)
 parser.add_argument('--ngpu', type=int, default=1, help='number of GPUs to use')
 parser.add_argument('--net_g', default='', help="path to net_g")
 parser.add_argument('--net_f', default='', help="path to net_f")
-parser.add_argument('--use_adversarial_real', action='store_true',
+parser.add_argument('--use_adv', action='store_true',
                     help='use adv examples')
+parser.add_argument('--adv_eps', type=float, default=0.01)
 parser.add_argument('--experiment', default=None,
                     help='Where to store samples and models')
 
@@ -58,7 +62,6 @@ def weights_init(m):
     if classname.find('Conv') != -1:
         m.weight.data.normal_(0.0, 0.02)
     elif classname.find('BatchNorm') != -1:
-        # TODO: check the batchnorm impl here, per-batch or running average?
         m.weight.data.normal_(1.0, 0.02)
         m.bias.data.fill_(0)
 
@@ -74,27 +77,21 @@ if __name__ == '__main__':
     assert opt.experiment is not None, 'specify output dir to avoid overwriting.'
     if not os.path.exists(opt.experiment):
         os.makedirs(opt.experiment)
+    print(opt, file=open(os.path.join(opt.experiment, 'configs.txt'), 'w'))
 
     cudnn.benchmark = True
 
-    # train_configs
-
     dataset = Cifar10Wrapper.load_default(opt.batch_size)
 
-    ngpu = int(opt.ngpu)
-    nz = int(opt.nz)
-    ngf = int(opt.ngf)
-    ndf = int(opt.ndf)
-    nc = 3
-
-    net_f = dcgan.DCGAN_D(opt.image_size, nz, nc, ndf, ngpu)
+    # this is tricky, use bn is bad?
+    net_f = dcgan.DCGAN_D(opt.image_size, opt.nz, opt.nc, opt.ndf, opt.ngpu)
     if opt.net_f:
         net_f.load_state_dict(torch.load(opt.net_f))
     else:
         net_f.apply(weights_init)
     print(net_f)
 
-    net_g = dcgan.DCGAN_G(opt.image_size, nz, nc, ngf, ngpu)
+    net_g = dcgan.DCGAN_G(opt.image_size, opt.nz, opt.nc, opt.ngf, opt.ngpu)
     if opt.net_g:
         net_g.load_state_dict(torch.load(opt.net_g))
     else:
@@ -105,8 +102,11 @@ if __name__ == '__main__':
     net_g.cuda()
 
     dem = DEM(net_f)
-    sampler = Sampler(net_g, nz, opt.lr_g, opt.batch_size, dataset.x_shape)
+    sampler = Sampler(net_g, opt, dataset.x_shape)
 
     opt.pcd_k = 25
-    opt.eps = 0.3
+
+    if opt.net_f and opt.net_g:
+        dem.eval(dataset.train_xs, dataset.test_xs)
+
     dem.train(opt, dataset, sampler)
