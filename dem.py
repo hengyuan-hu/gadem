@@ -16,7 +16,6 @@ def assert_zero_grads(params):
 
 
 def append_adversarial_x(x_cpu, net_f, eps):
-    # TODO: assert net_f gradient should be zero before entering
     # assert_zero_grads(net_f.parameters())
     for p in net_f.parameters():
         p.requires_grad = False
@@ -36,6 +35,24 @@ def append_adversarial_x(x_cpu, net_f, eps):
     return ret
 
 
+def lmc_move(samples, net_f, noises, grad_scale, noise_scale):
+    utils.assert_eq(type(samples), torch.cuda.FloatTensor)
+    utils.assert_eq(type(noises), torch.cuda.FloatTensor)
+    for p in net_f.parameters():
+        assert not p.requires_grad
+
+    samples = Variable(samples, requires_grad=True)
+    fe = net_f(samples)
+    fe.backward()
+
+    scaled_grads = grad_scale * samples.grad.data
+    scaled_noises = noise_scale * noises
+    lmc_samples = samples.data - scaled_grads + scaled_noises
+    lmc_samples.clamp_(-1.0, 1.0)
+    utils.assert_eq(type(lmc_samples), torch.cuda.FloatTensor)
+    return lmc_samples
+
+
 class DEM(object):
     def __init__(self, net_f):
         self.net_f = net_f
@@ -46,9 +63,10 @@ class DEM(object):
         fe_pos_vals = np.zeros(len(dataset))
         fe_neg_vals = np.zeros(len(dataset))
         fe_g_vals = np.zeros(len(dataset))
-        fe_lmc_vals = np.zeros(len(dataset))
         g_steps = np.zeros(len(dataset))
-        lmc_steps = np.zeros(len(dataset))
+
+        # fe_lmc_vals = np.zeros(len(dataset))
+        # lmc_steps = np.zeros(len(dataset))
 
         log_file = open(os.path.join(configs.experiment, 'log_f.txt'), 'w')
 
@@ -76,12 +94,10 @@ class DEM(object):
 
                 # assert_zero_grads(sampler.net_g.parameters())
                 pcd_k = configs.pcd_k if eid < 25 else 100
-                use_lmc = eid >= 25
+                # use_lmc = eid >= 25
                 samples, infos = sampler.sample(
-                    self.net_f, fe_pos.data[0], pcd_k, use_lmc)
-
-                g_steps[bid], fe_g_vals[bid], lmc_steps[bid], fe_lmc_vals[bid] = infos
-
+                    self.net_f, fe_pos.data[0], pcd_k, True)
+                g_steps[bid], fe_g_vals[bid] = infos
                 utils.assert_eq(type(samples), torch.cuda.FloatTensor)
                 # assert_zero_grads(sampler.net_g.parameters())
 
@@ -97,12 +113,11 @@ class DEM(object):
                 fe_neg_vals[bid] = fe_neg.data[0]
                 loss_vals[bid] = loss_f.data[0]
 
-            log = ('[%d/%d] Loss_F: %s FE_pos: %s, FE_neg %s, '
-                   'FE_g %s, g_steps %.1f, FE_lmc %s,  lmc_steps %.1f') \
+            log = ('[%d/%d] Loss_F: %.8f FE_pos: %.8f, FE_neg %.8f, '
+                   'FE_g %.8f, g_steps %.1f') \
                    % (eid+1, configs.num_epochs,
                       loss_vals.mean(), fe_pos_vals.mean(), fe_neg_vals.mean(),
-                      fe_g_vals.mean(), g_steps.mean(),
-                      fe_lmc_vals.mean(), lmc_steps.mean())
+                      fe_g_vals.mean(), g_steps.mean())
             print(log)
             print('Time Taken:', time.time() - t)
             log_file.write(log+'\n')
@@ -149,18 +164,17 @@ class Sampler(object):
         self.optimizer = torch.optim.RMSprop(self.net_g.parameters(), lr=configs.lr_g)
 
         z_shape = (configs.batch_size, configs.nz, 1, 1)
-        self.fix_noise = torch_utils.create_cuda_variable(z_shape)
-        self.fix_noise.data.normal_(0, 1)
-        self.noise = torch_utils.create_cuda_variable(z_shape)
+        self.z = torch_utils.create_cuda_variable(z_shape)
+        self.fix_z = torch_utils.create_cuda_variable(z_shape)
+        self.fix_z.data.normal_(0, 1)
 
         samples_shape = (configs.batch_size,) + x_shape
-        self.lmc_samples = torch.FloatTensor(*samples_shape)
-        self.lmc_samples = self.lmc_samples.cuda()
-        self.lmc_samples.uniform_(-1.0, 1.0)
+        # self.lmc_samples = torch.FloatTensor(*samples_shape)
+        # self.lmc_samples = self.lmc_samples.cuda()
+        # self.lmc_samples.uniform_(-1.0, 1.0)
 
-        self.lmc_noise = torch.FloatTensor(*samples_shape)
-        self.lmc_noise = self.lmc_noise.cuda()
-
+        self.lmc_noise = torch.FloatTensor(*samples_shape).cuda()
+        # self.lmc_noise = self.lmc_noise.cuda()
         self.lmc_grad_scale = configs.lmc_grad_scale
         self.lmc_noise_scale = configs.lmc_noise_scale
 
@@ -170,66 +184,34 @@ class Sampler(object):
         assert net_f.training
         net_f.eval()
 
-        self.noise.data.normal_(0, 1)
+        self.z.data.normal_(0, 1)
         for g_step in range(pcd_k):
             self.net_g.zero_grad()
-            fake = self.net_g(self.noise)
-            fake_fe = net_f(fake)
-            if fake_fe.data[0] < lower_bound:
+            samples = self.net_g(self.z)
+            samples_fe = net_f(samples)
+            if samples_fe.data[0] < lower_bound:
                 break
-            fake_fe.backward()
+            samples_fe.backward()
             self.optimizer.step()
 
+        samples = samples.data
+        infos = (g_step, samples_fe.data[0])
         if use_lmc:
-            # lmc samples
-            for lmc_step in range(pcd_k):
-                lmc_samples = Variable(self.lmc_samples, requires_grad=True)
-                lmc_fe = net_f(lmc_samples)
-                # if lmc_step % 50 == 0:
-                #     print(lmc_step, '>>>lmc fe:', lmc_fe.data[0], 'lb:', lower_bound)
-                #     print('grad scale:',
-                #           torch.min(lmc_samples.grad.data),
-                #           torch.max(lmc_samples.grad.data))
-
-                if lmc_fe.data[0] < lower_bound:
-                    break
-                lmc_fe.backward()
-
-                # if lmc_step % 50 == 0:
-                #     print('grad scale:',
-                #           torch.min(lmc_samples.grad.data),
-                #           torch.max(lmc_samples.grad.data))
-
-                self.lmc_noise.normal_(0, 1)
-                self.lmc_samples = (self.lmc_samples
-                                    - self.lmc_grad_scale * lmc_samples.grad.data
-                                    + self.lmc_noise_scale * self.lmc_noise)
-                self.lmc_samples.clamp_(-1.0, 1.0)
-
-                samples = torch.cat((fake.data, self.lmc_samples))
-                # print('----------')
-                # print('>>> samples shape:', samples.size())
-                # print('seperate energys:', fake_fe.data[0], lmc_fe.data[0])
-                # print(net_f(fake).data[0], net_f(Variable(self.lmc_samples)).data[0])
-                # print('combined:', net_f(Variable(samples)).data[0])
-                # print('==========')
-                infos = (g_step, fake_fe.data[0], lmc_step, lmc_fe.data[0])
-        else:
-            samples = fake.data
-            infos = (g_step, fake_fe.data[0], 0, 0)
+            self.lmc_noise.normal_(0, 1)
+            samples = lmc_move(samples, net_f, self.lmc_noise,
+                               self.lmc_grad_scale, self.lmc_noise_scale)
 
         for p in net_f.parameters():
             p.requires_grad = True
         net_f.train()
-
         return samples, infos
 
     def save_samples(self, prefix):
         assert self.net_g.training
         self.net_g.eval()
-        fake = self.net_g(self.fix_noise)
+        samples = self.net_g(self.fix_z)
         self.net_g.train()
         vutils.save_image(
-            fake.data, '%s_g_samples.png' % prefix, nrow=10)
-        vutils.save_image(
-            self.lmc_samples, '%s_lmc_samples.png' % prefix, nrow=10)
+            samples.data, '%s_g_samples.png' % prefix, nrow=10)
+        # vutils.save_image(
+        #     self.lmc_samples, '%s_lmc_samples.png' % prefix, nrow=10)

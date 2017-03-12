@@ -44,8 +44,8 @@ parser.add_argument('--lr_f', type=float, default=0.00005,
                     help='learning rate for Critic, default=0.00005')
 parser.add_argument('--lr_g', type=float, default=0.00005,
                     help='learning rate for Generator, default=0.00005')
-parser.add_argument('--lmc_grad_scale', type=float, default=1.0)
-parser.add_argument('--lmc_noise_scale', type=float, default=0.1)
+parser.add_argument('--lmc_grad_scale', type=float, default=0.1)
+parser.add_argument('--lmc_noise_scale', type=float, default=0.001)
 parser.add_argument('--ngpu', type=int, default=1, help='number of GPUs to use')
 parser.add_argument('--net_g', default='', help="path to net_g")
 parser.add_argument('--net_f', default='', help="path to net_f")
@@ -84,7 +84,7 @@ if __name__ == '__main__':
     dataset = Cifar10Wrapper.load_default(opt.batch_size)
 
     # this is tricky, use bn is bad?
-    net_f = dcgan.DCGAN_D(opt.image_size, opt.nz, opt.nc, opt.ndf, opt.ngpu)
+    net_f = dcgan.DCGAN_D_nobn(opt.image_size, opt.nz, opt.nc, opt.ndf, opt.ngpu)
     if opt.net_f:
         net_f.load_state_dict(torch.load(opt.net_f))
     else:
