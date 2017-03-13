@@ -96,7 +96,7 @@ class DEM(object):
                 pcd_k = configs.pcd_k if eid < 25 else 100
                 # use_lmc = eid >= 25
                 samples, infos = sampler.sample(
-                    self.net_f, fe_pos.data[0], pcd_k, True)
+                    self.net_f, fe_pos.data[0], pcd_k, False)
                 g_steps[bid], fe_g_vals[bid] = infos
                 utils.assert_eq(type(samples), torch.cuda.FloatTensor)
                 # assert_zero_grads(sampler.net_g.parameters())
@@ -130,6 +130,10 @@ class DEM(object):
                            '%s/net_f_epoch_%s.pth' % (configs.experiment, eid+1))
                 torch.save(sampler.net_g.state_dict(),
                            '%s/net_g_epoch_%s.pth' % (configs.experiment, eid+1))
+                eval_log = self.eval(dataset.train_xs, dataset.test_xs)
+                log_file.write(eval_log+'\n')
+                log_file.flush()
+
         log_file.close()
 
     def eval(self, train_xs, test_xs):
@@ -154,8 +158,11 @@ class DEM(object):
 
         mean_train_fes = train_fes.mean()
         mean_test_fes = test_fes.mean()
-        print('Eval:\nfree_energy on train: %s;\nfree_energy on test: %s;\nratio: %s' %
-              (mean_train_fes, mean_test_fes, mean_train_fes / mean_test_fes))
+        log = 'Eval:\nfree_energy on train: %s;\nfree_energy on test: %s;\nratio: %s' \
+              % (mean_train_fes, mean_test_fes,
+                 np.exp(mean_train_fes-mean_test_fes))
+        print(log)
+        return log
 
 
 class Sampler(object):
