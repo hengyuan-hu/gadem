@@ -5,7 +5,7 @@ import time
 import numpy as np
 import torch
 from torch.autograd import Variable
-import torchvision.utils as vutils
+import torchvision
 import utils
 import torch_utils
 
@@ -218,7 +218,5 @@ class Sampler(object):
         self.net_g.eval()
         samples = self.net_g(self.fix_z)
         self.net_g.train()
-        vutils.save_image(
+        torchvision.utils.save_image(
             samples.data, '%s_g_samples.png' % prefix, nrow=10)
-        # vutils.save_image(
-        #     self.lmc_samples, '%s_lmc_samples.png' % prefix, nrow=10)

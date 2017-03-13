@@ -119,6 +119,20 @@ class MnistWrapper(DatasetWrapper):
         return cls(train_xs, train_ys, test_xs, test_ys, batch_size)
 
 
+def augment_batch(batch, pad_dim=4):
+    augmented_batch = np.zeros(batch.shape)
+    num_imgs, _, height, width = batch.shape
+    for i in range(num_imgs):
+        img = batch[i]
+        if np.random.normal(0, 1, (1,))[0] >= 0.5:
+            img = img[:, :, ::-1]
+        img = np.pad(
+            img, ((0,), (pad_dim,), (pad_dim,)), 'constant', constant_values=(0,1))
+        start_h, start_w = np.random.randint(0, 2*pad_dim, (2,))
+        augmented_batch[i] = img[:, start_h:start_h+height, start_w:start_w+width]
+    return augmented_batch
+
+
 class Cifar10Wrapper(DatasetWrapper):
     idx2cls = ['airplane', 'automobile', 'bird', 'cat', 'deer',
                'dog', 'frog', 'horse', 'ship', 'truck']
@@ -132,6 +146,13 @@ class Cifar10Wrapper(DatasetWrapper):
         train_xs = (train_xs / 255.0 - 0.5) * 2.0
         test_xs = (test_xs / 255.0 - 0.5) * 2.0
         return cls(train_xs, train_ys, test_xs, test_ys, batch_size)
+
+    def next(self):
+        self.batch_idx += 1
+        batch = self.train_xs[(self.batch_idx-1) * self.batch_size :
+                              self.batch_idx * self.batch_size]
+        batch = augment_batch(batch)
+        return torch.from_numpy(batch)
 
 
 # class STL10Wrapper(DatasetWrapper):
