@@ -44,13 +44,13 @@ parser.add_argument('--lr_f', type=float, default=0.00005,
                     help='learning rate for Critic, default=0.00005')
 parser.add_argument('--lr_g', type=float, default=0.00005,
                     help='learning rate for Generator, default=0.00005')
+parser.add_argument('--use_lmc', action='store_true', help='use adv examples')
 parser.add_argument('--lmc_grad_scale', type=float, default=0.1)
 parser.add_argument('--lmc_noise_scale', type=float, default=0.001)
 parser.add_argument('--ngpu', type=int, default=1, help='number of GPUs to use')
 parser.add_argument('--net_g', default='', help="path to net_g")
 parser.add_argument('--net_f', default='', help="path to net_f")
-parser.add_argument('--use_adv', action='store_true',
-                    help='use adv examples')
+parser.add_argument('--use_adv', action='store_true', help='use adv examples')
 parser.add_argument('--adv_eps', type=float, default=0.01)
 parser.add_argument('--experiment', default=None,
                     help='Where to store samples and models')

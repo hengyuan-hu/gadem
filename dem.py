@@ -96,7 +96,7 @@ class DEM(object):
                 pcd_k = configs.pcd_k if eid < 25 else 100
                 # use_lmc = eid >= 25
                 samples, infos = sampler.sample(
-                    self.net_f, fe_pos.data[0], pcd_k, False)
+                    self.net_f, fe_pos.data[0], pcd_k, configs.use_lmc)
                 g_steps[bid], fe_g_vals[bid] = infos
                 utils.assert_eq(type(samples), torch.cuda.FloatTensor)
                 # assert_zero_grads(sampler.net_g.parameters())
