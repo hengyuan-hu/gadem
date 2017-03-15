@@ -44,7 +44,7 @@ parser.add_argument('--lr_f', type=float, default=0.0005,
                     help='learning rate for Critic, default=0.00005')
 parser.add_argument('--lr_g', type=float, default=0.0005,
                     help='learning rate for Generator, default=0.00005')
-parser.add_argument('--use_lmc', action='store_true', help='use adv examples')
+# parser.add_argument('--use_lmc', action='store_true', help='use adv examples')
 parser.add_argument('--lmc_grad_scale', type=float, default=0.1)
 parser.add_argument('--lmc_noise_scale', type=float, default=0.001)
 parser.add_argument('--ngpu', type=int, default=1, help='number of GPUs to use')
@@ -69,6 +69,8 @@ def weights_init(m):
 if __name__ == '__main__':
     opt = parser.parse_args()
     opt.manualSeed = 666999
+    torch.manual_seed(999666)
+    torch.cuda.manual_seed(6669999)
     print(opt)
 
     random.seed(opt.manualSeed)
@@ -91,7 +93,7 @@ if __name__ == '__main__':
         net_f.apply(weights_init)
     print(net_f)
 
-    net_g = dcgan.DCGAN_G(opt.image_size, opt.nz, opt.nc, opt.ngf, opt.ngpu)
+    net_g = dcgan.DCGAN_G_nobn(opt.image_size, opt.nz, opt.nc, opt.ngf, opt.ngpu)
     if opt.net_g:
         net_g.load_state_dict(torch.load(opt.net_g))
     else:
@@ -102,9 +104,9 @@ if __name__ == '__main__':
     net_g.cuda()
 
     dem = DEM(net_f)
-    sampler = Sampler(net_g, opt, dataset.x_shape)
+    sampler = Sampler(net_g, net_f, opt)
 
-    opt.pcd_k = 100
+    opt.max_g_steps = 100
 
     if opt.net_f and opt.net_g:
         dem.eval(dataset.train_xs, dataset.test_xs)

@@ -9,7 +9,11 @@ import torchvision
 import utils
 import torch_utils
 
-from hmc import hmc_sample
+from hmc import HMCSampler
+
+
+# NORMAL_THRES = 2.0
+UNIFORM_THRES = 1.0
 
 
 def assert_zero_grads(params):
@@ -81,21 +85,14 @@ class DEM(object):
 
             for bid in range(len(dataloader)):
                 self.net_f.zero_grad()
-                pos_cpu = dataloader.next()
 
-                # if configs.use_adv:
-                #     pos_gpu = append_adversarial_x(
-                #         pos_cpu, self.net_f, configs.adv_eps)
-                #     data_node.data.resize_(pos_gpu.size()).copy_(pos_gpu)
-                # else:
+                pos_cpu = dataloader.next()
                 data_node.data.resize_(pos_cpu.size()).copy_(pos_cpu)
                 fe_pos = self.net_f.loss(data_node)
 
                 # assert_zero_grads(sampler.net_g.parameters())
-                pcd_k = configs.pcd_k if eid < 25 else 100
-                # use_lmc = eid >= 25
-                samples, infos = sampler.sample(
-                    self.net_f, fe_pos.data[0], pcd_k, configs.use_lmc)
+                max_g_steps = configs.max_g_steps if eid < 25 else 100
+                samples, infos = sampler.sample(fe_pos.data[0], max_g_steps)
                 g_steps[bid], fe_g_vals[bid], accept_rates[bid] = infos
                 utils.assert_eq(type(samples), torch.cuda.FloatTensor)
                 # assert_zero_grads(sampler.net_g.parameters())
@@ -164,65 +161,75 @@ class DEM(object):
         return log
 
 
+def freeze_net(net):
+    assert net.training, 'should only be called to convert train-net to eval-net'
+    for p in net.parameters():
+        p.requires_grad = False
+    net.eval()
+
+
+def unfreeze_net(net):
+    assert not net.training, 'should only be called to convert eval-net to train-net'
+    for p in net.parameters():
+        p.requires_grad = True
+    net.train()
+
+
+import matplotlib.pyplot as plt
+def plot_z_dist(zs, prefix):
+    zs = zs.numpy()
+    zs = zs.reshape((-1,))
+    print(zs.shape)
+    plt.hist(zs, 20)
+    plt.savefig('%s_z_dist.png' % prefix)
+    plt.close()
+
+
 class Sampler(object):
-    def __init__(self, net_g, configs, x_shape):
-        self.net_g = net_g
+    def __init__(self, net_g, net_f, configs):
+        self.net_g = net_g # g should not be accessed by others
+        self.net_f = net_f
         self.optimizer = torch.optim.RMSprop(self.net_g.parameters(), lr=configs.lr_g)
 
         z_shape = (configs.batch_size, configs.nz, 1, 1)
         self.z = torch_utils.create_cuda_variable(z_shape)
-        self.fix_z = torch_utils.create_cuda_variable(z_shape)
-        self.fix_z.data.normal_(0, 1)
 
-        samples_shape = (configs.batch_size,) + x_shape
-        # self.samples = torch.cuda.FloatTensor(*samples_shape)
-        # self.samples.uniform_(-1.0, 1.0)
-        # self.lmc_samples = torch.FloatTensor(*samples_shape)
-        # self.lmc_samples = self.lmc_samples.cuda()
-        # self.lmc_samples.uniform_(-1.0, 1.0)
+        hmc_z_init = torch.cuda.FloatTensor(*z_shape).uniform_(
+            -UNIFORM_THRES, UNIFORM_THRES)
+        # print('hmc init shape:', hmc_z_init.size())
+        self.fe_wrt_z = lambda z: self.net_f(self.net_g(z))
+        self.hmc_sampler = HMCSampler(hmc_z_init, self.fe_wrt_z, num_steps=5)
 
-        self.lmc_noise = torch.FloatTensor(*samples_shape).cuda()
-        # self.lmc_noise = self.lmc_noise.cuda()
-        self.lmc_grad_scale = configs.lmc_grad_scale
-        self.lmc_noise_scale = configs.lmc_noise_scale
+    def sample(self, lower_bound, max_g_steps):
+        freeze_net(self.net_f)
 
-    def sample(self, net_f, lower_bound, pcd_k, use_lmc):
-        for p in net_f.parameters():
-            p.requires_grad = False
-        assert net_f.training
-        net_f.eval()
-
-        self.z.data.normal_(0, 1)
-        for g_step in range(pcd_k):
+        # tune g to maximize density
+        for g_step in range(max_g_steps):
             self.net_g.zero_grad()
+            self.z.data.uniform_(-UNIFORM_THRES, UNIFORM_THRES)
             samples = self.net_g(self.z)
-            samples_fe = net_f.loss(samples)
-            if samples_fe.data[0] < lower_bound:
+            samples_fe = self.net_f.loss(samples)
+            if samples_fe.data[0] < lower_bound and g_step >= 1:
                 break
             samples_fe.backward()
             self.optimizer.step()
 
-        samples = samples.data
-        if use_lmc:
-            samples, accept_rate = hmc_sample(samples, 0.1, 20, net_f)
-            infos = (g_step, samples_fe.data[0], accept_rate)
-            samples.clamp_(-1.0, 1.0)
-            self.samples = samples
-            # self.lmc_noise.normal_(0, 1)
-            # samples = lmc_move(samples, net_f, self.lmc_noise,
-            #                    self.lmc_grad_scale, self.lmc_noise_scale)
-        else:
-            infos = (g_step, samples_fe.data[0], 0)
+        # draw samples in z space with hmc
+        freeze_net(self.net_g)
+        z_samples, accept_rate = self.hmc_sampler.sample(normalize=True)
+        x_samples = self.net_g(Variable(z_samples)).data
+        unfreeze_net(self.net_g)
 
-        for p in net_f.parameters():
-            p.requires_grad = True
-        net_f.train()
-        return samples, infos
+        unfreeze_net(self.net_f)
+        infos = (g_step, samples_fe.data[0], accept_rate)
+        return x_samples, infos
 
     def save_samples(self, prefix):
-        assert self.net_g.training
-        self.net_g.eval()
-        samples = self.net_g(self.fix_z)
-        self.net_g.train()
+        freeze_net(self.net_g)
+        samples = self.net_g(Variable(self.hmc_sampler.pos)).data
+        unfreeze_net(self.net_g)
+
+        print(self.hmc_sampler.pos.min(), self.hmc_sampler.pos.max())
+        plot_z_dist(self.hmc_sampler.pos.cpu(), prefix)
         torchvision.utils.save_image(
-            samples.data, '%s_g_samples.png' % prefix, nrow=10)
+            samples, '%s_g_samples.png' % prefix, nrow=10)
