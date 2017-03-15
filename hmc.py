@@ -66,7 +66,7 @@ def hmc_sample(pos, step_size, num_steps, potential_fn):
     accept_rate = accept.mean()
 
     # print(type(final_pos))
-    accept = accept.view(-1, 1).expand_as(final_pos)
+    accept = accept.view(-1, 1, 1, 1).expand_as(final_pos)
     # print(accept)
     new_pos = final_pos * accept + pos * (1 - accept)
     return new_pos, accept_rate
@@ -141,4 +141,4 @@ def sampler_on_nd_gaussian(burnin, num_chains, num_samples, dim):
 
 if __name__ == '__main__':
     torch.backends.cudnn.benckmark = True
-    sampler_on_nd_gaussian(1000, 10, 1000, 5)
+    # sampler_on_nd_gaussian(1000, 10, 1000, 5)

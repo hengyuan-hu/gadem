@@ -158,8 +158,11 @@ class DCGAN_D_nobn(nn.Module):
         output = output.view(output.size(0), -1)
         output = self.dropout(output)
         output = self.fc(output)
-        output = output.mean(0)
-        return output.view(1)
+        # output = output.mean(0)
+        return output
+
+    def loss(self, input):
+        return self.forward(input).mean(0).view(1)
 
 
 class DCGAN_G_nobn(nn.Module):

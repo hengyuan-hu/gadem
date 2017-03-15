@@ -9,7 +9,7 @@ import os
 
 
 def assert_eq(real, expected):
-    assert real == expected, '%s (true) vs %d (expected)' % (real, expected)
+    assert real == expected, '%s (true) vs %s (expected)' % (real, expected)
 
 
 CIFAR10_COLOR_MEAN_RGB = np.array([125.3, 123.0, 113.9]).reshape(3, 1, 1)

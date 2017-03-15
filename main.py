@@ -40,9 +40,9 @@ parser.add_argument('--ngf', type=int, default=64)
 parser.add_argument('--ndf', type=int, default=64)
 parser.add_argument('--num_epochs', type=int, default=1000,
                     help='number of epochs to train for')
-parser.add_argument('--lr_f', type=float, default=0.00005,
+parser.add_argument('--lr_f', type=float, default=0.0005,
                     help='learning rate for Critic, default=0.00005')
-parser.add_argument('--lr_g', type=float, default=0.00005,
+parser.add_argument('--lr_g', type=float, default=0.0005,
                     help='learning rate for Generator, default=0.00005')
 parser.add_argument('--use_lmc', action='store_true', help='use adv examples')
 parser.add_argument('--lmc_grad_scale', type=float, default=0.1)
@@ -104,7 +104,7 @@ if __name__ == '__main__':
     dem = DEM(net_f)
     sampler = Sampler(net_g, opt, dataset.x_shape)
 
-    opt.pcd_k = 25
+    opt.pcd_k = 100
 
     if opt.net_f and opt.net_g:
         dem.eval(dataset.train_xs, dataset.test_xs)
