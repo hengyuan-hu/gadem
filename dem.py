@@ -191,12 +191,12 @@ class Sampler(object):
         assert net_f.training
         net_f.eval()
 
-        self.z.data.normal_(0, 1)
         for g_step in range(pcd_k):
+            self.z.data.normal_(0, 1)
             self.net_g.zero_grad()
             samples = self.net_g(self.z)
             samples_fe = net_f(samples)
-            if samples_fe.data[0] < lower_bound:
+            if samples_fe.data[0] < max(lower_bound * 0.9, lower_bound * 1.1):
                 break
             samples_fe.backward()
             self.optimizer.step()
