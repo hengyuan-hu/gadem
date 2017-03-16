@@ -40,7 +40,7 @@ def simulate_dynamics(init_pos, init_vel, step_size, num_steps, potential_fn):
     potential.backward()
     new_vel = init_vel - 0.5 * step_size * var_pos.grad.data
     new_pos = init_pos + step_size * new_vel
-    new_pos.clamp_(-dem.UNIFORM_THRES, dem.UNIFORM_THRES)
+    new_pos.clamp_(-dem.NORMAL_THRES, dem.NORMAL_THRES)
 
     for _ in xrange(num_steps - 1):
         var_pos = Variable(new_pos, requires_grad=True)
@@ -49,7 +49,7 @@ def simulate_dynamics(init_pos, init_vel, step_size, num_steps, potential_fn):
         new_vel.add_(-step_size * var_pos.grad.data)
         new_pos.add_(step_size * new_vel)
 
-        new_pos.clamp_(-dem.UNIFORM_THRES, dem.UNIFORM_THRES)
+        new_pos.clamp_(-dem.NORMAL_THRES, dem.NORMAL_THRES)
 
     var_pos = Variable(new_pos, requires_grad=True)
     potential = potential_fn(var_pos).sum(0)

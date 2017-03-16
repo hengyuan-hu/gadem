@@ -9,10 +9,10 @@ import torchvision
 import utils
 import torch_utils
 
-from hmc import HMCSampler
+from hmc import HMCSampler, hmc_sample
 
 
-# NORMAL_THRES = 2.0
+NORMAL_THRES = 3.0
 UNIFORM_THRES = 1.0
 
 
@@ -21,40 +21,20 @@ def assert_zero_grads(params):
         utils.assert_eq(p.grad.data.sum(), 0)
 
 
-# def append_adversarial_x(x_cpu, net_f, eps):
-#     # assert_zero_grads(net_f.parameters())
-#     for p in net_f.parameters():
-#         p.requires_grad = False
-
-#     x = Variable(x_cpu.cuda(), requires_grad=True)
-#     fe = net_f(x)
-#     fe.backward()
-#     scaled_grad_sign = torch.sign(x.grad.data) * eps
-#     adv_x = x.data + scaled_grad_sign
-#     adv_x.clamp_(-1.0, 1.0)
-#     ret = torch.cat((x.data, adv_x))
-#     # print('x energy:', fe.data[0], 'adv_x energy:', net_f(Variable(adv_x)).data[0])
-
-#     for p in net_f.parameters():
-#         p.requires_grad = True
-#     # assert_zero_grads(net_f.parameters())
-#     return ret
-
-
-# def lmc_move(samples, net_f, noises, grad_scale, noise_scale):
+# def lmc_move(samples, net_f, net_g, noises, grad_scale, noise_scale):
 #     utils.assert_eq(type(samples), torch.cuda.FloatTensor)
 #     utils.assert_eq(type(noises), torch.cuda.FloatTensor)
 #     for p in net_f.parameters():
 #         assert not p.requires_grad
 
 #     samples = Variable(samples, requires_grad=True)
-#     fe = net_f(samples)
+#     fe = net_f(net_g(samples)).sum(0)
 #     fe.backward()
 
 #     scaled_grads = grad_scale * samples.grad.data
 #     scaled_noises = noise_scale * noises
 #     lmc_samples = samples.data - scaled_grads + scaled_noises
-#     lmc_samples.clamp_(-1.0, 1.0)
+#     lmc_samples.clamp_(-2.0, 2.0)
 #     utils.assert_eq(type(lmc_samples), torch.cuda.FloatTensor)
 #     return lmc_samples
 
@@ -194,11 +174,11 @@ class Sampler(object):
         z_shape = (configs.batch_size, configs.nz, 1, 1)
         self.z = torch_utils.create_cuda_variable(z_shape)
 
-        hmc_z_init = torch.cuda.FloatTensor(*z_shape).uniform_(
+        self.hmc_z = torch.cuda.FloatTensor(*z_shape).uniform_(
             -UNIFORM_THRES, UNIFORM_THRES)
         # print('hmc init shape:', hmc_z_init.size())
         self.fe_wrt_z = lambda z: self.net_f(self.net_g(z))
-        self.hmc_sampler = HMCSampler(hmc_z_init, self.fe_wrt_z, num_steps=5)
+        # self.hmc_sampler = HMCSampler(hmc_z_init, self.fe_wrt_z, num_steps=5)
 
     def sample(self, lower_bound, max_g_steps):
         freeze_net(self.net_f)
@@ -206,7 +186,7 @@ class Sampler(object):
         # tune g to maximize density
         for g_step in range(max_g_steps):
             self.net_g.zero_grad()
-            self.z.data.uniform_(-UNIFORM_THRES, UNIFORM_THRES)
+            self.z.data.normal_()
             samples = self.net_g(self.z)
             samples_fe = self.net_f.loss(samples)
             if samples_fe.data[0] < lower_bound and g_step >= 1:
@@ -216,8 +196,8 @@ class Sampler(object):
 
         # draw samples in z space with hmc
         freeze_net(self.net_g)
-        z_samples, accept_rate = self.hmc_sampler.sample(normalize=True)
-        x_samples = self.net_g(Variable(z_samples)).data
+        self.hmc_z, accept_rate = hmc_sample(self.hmc_z, 0.1, 5, self.fe_wrt_z)
+        x_samples = self.net_g(Variable(self.hmc_z)).data
         unfreeze_net(self.net_g)
 
         unfreeze_net(self.net_f)
@@ -226,10 +206,9 @@ class Sampler(object):
 
     def save_samples(self, prefix):
         freeze_net(self.net_g)
-        samples = self.net_g(Variable(self.hmc_sampler.pos)).data
+        samples = self.net_g(Variable(self.hmc_z)).data
         unfreeze_net(self.net_g)
 
-        print(self.hmc_sampler.pos.min(), self.hmc_sampler.pos.max())
-        plot_z_dist(self.hmc_sampler.pos.cpu(), prefix)
+        plot_z_dist(self.hmc_z.cpu(), prefix)
         torchvision.utils.save_image(
             samples, '%s_g_samples.png' % prefix, nrow=10)
