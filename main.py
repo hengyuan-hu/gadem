@@ -52,6 +52,8 @@ parser.add_argument('--net_g', default='', help="path to net_g")
 parser.add_argument('--net_f', default='', help="path to net_f")
 parser.add_argument('--use_adv', action='store_true', help='use adv examples')
 parser.add_argument('--adv_eps', type=float, default=0.01)
+parser.add_argument('--hmc_steps', type=int, default=5)
+parser.add_argument('--hmc_step_size', type=float, default=0.1)
 parser.add_argument('--experiment', default=None,
                     help='Where to store samples and models')
 

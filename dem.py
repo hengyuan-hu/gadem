@@ -71,8 +71,11 @@ class DEM(object):
                 fe_pos = self.net_f.loss(data_node)
 
                 # assert_zero_grads(sampler.net_g.parameters())
-                max_g_steps = configs.max_g_steps if eid < 25 else 100
-                samples, infos = sampler.sample(fe_pos.data[0], max_g_steps)
+                # max_g_steps = configs.max_g_steps if eid < 25 else 100
+                max_g_steps = 1
+                samples, infos = sampler.sample(
+                    fe_pos.data[0], max_g_steps,
+                    configs.hmc_step_size, configs.hmc_steps)
                 g_steps[bid], fe_g_vals[bid], accept_rates[bid] = infos
                 utils.assert_eq(type(samples), torch.cuda.FloatTensor)
                 # assert_zero_grads(sampler.net_g.parameters())
@@ -180,7 +183,7 @@ class Sampler(object):
         self.fe_wrt_z = lambda z: self.net_f(self.net_g(z))
         # self.hmc_sampler = HMCSampler(hmc_z_init, self.fe_wrt_z, num_steps=5)
 
-    def sample(self, lower_bound, max_g_steps):
+    def sample(self, lower_bound, max_g_steps, hmc_step_size, hmc_steps):
         freeze_net(self.net_f)
 
         # tune g to maximize density
@@ -189,14 +192,15 @@ class Sampler(object):
             self.z.data.normal_()
             samples = self.net_g(self.z)
             samples_fe = self.net_f.loss(samples)
-            if samples_fe.data[0] < lower_bound and g_step >= 1:
-                break
+            # if samples_fe.data[0] < lower_bound and g_step >= 1:
+            #     break
             samples_fe.backward()
             self.optimizer.step()
 
         # draw samples in z space with hmc
         freeze_net(self.net_g)
-        self.hmc_z, accept_rate = hmc_sample(self.hmc_z, 0.1, 5, self.fe_wrt_z)
+        self.hmc_z, accept_rate = hmc_sample(
+            self.hmc_z, hmc_step_size, hmc_steps, self.fe_wrt_z)
         x_samples = self.net_g(Variable(self.hmc_z)).data
         unfreeze_net(self.net_g)
 
