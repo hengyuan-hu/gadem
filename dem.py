@@ -56,7 +56,7 @@ class DEM(object):
 
                 max_steps = cfgs.max_steps if eid < 25 else 100
                 samples, infos = sampler.sample(
-                    self.net_f, pos_fe.data[0], max_steps)
+                    self.net_f, ceil_lb(pos_fe.data[0]), max_steps)
                 sample_node.data.resize_(samples.size()).copy_(samples)
                 neg_fe = self.net_f(sample_node)
                 neg_fe.backward(NEG_ONE)
