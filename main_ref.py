@@ -47,6 +47,7 @@ parser.add_argument('--netD', default='', help="path to netD (to continue traini
 # parser.add_argument('--clamp_upper', type=float, default=0.01)
 # parser.add_argument('--Diters', type=int, default=5, help='number of D iters per each G iter')
 parser.add_argument('--noBN', action='store_true', help='use batchnorm or not (only for DCGAN)')
+parser.add_argument('--dnoBN', action='store_true', help='use batchnorm or not (only for DCGAN)')
 parser.add_argument('--mlp_G', action='store_true', help='use MLP for G')
 # parser.add_argument('--mlp_D', action='store_true', help='use MLP for D')
 # parser.add_argument('--n_extra_layers', type=int, default=0, help='Number of extra layers on gen and disc')
