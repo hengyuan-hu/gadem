@@ -46,8 +46,8 @@ parser.add_argument('--netD', default='', help="path to netD (to continue traini
 # parser.add_argument('--clamp_lower', type=float, default=-0.01)
 # parser.add_argument('--clamp_upper', type=float, default=0.01)
 # parser.add_argument('--Diters', type=int, default=5, help='number of D iters per each G iter')
-# parser.add_argument('--noBN', action='store_true', help='use batchnorm or not (only for DCGAN)')
-# parser.add_argument('--mlp_G', action='store_true', help='use MLP for G')
+parser.add_argument('--noBN', action='store_true', help='use batchnorm or not (only for DCGAN)')
+parser.add_argument('--mlp_G', action='store_true', help='use MLP for G')
 # parser.add_argument('--mlp_D', action='store_true', help='use MLP for D')
 # parser.add_argument('--n_extra_layers', type=int, default=0, help='Number of extra layers on gen and disc')
 parser.add_argument('--experiment', default=None,
@@ -69,6 +69,7 @@ opt.manualSeed = 666999 # random.randint(1, 10000) # fix seed
 print("Random Seed: ", opt.manualSeed)
 random.seed(opt.manualSeed)
 torch.manual_seed(opt.manualSeed)
+torch.cuda.manual_seed(opt.manualSeed)
 
 cudnn.benchmark = True
 
@@ -125,29 +126,23 @@ def weights_init(m):
     if classname.find('Conv') != -1:
         m.weight.data.normal_(0.0, 0.02)
     elif classname.find('BatchNorm') != -1:
-        # TODO: check the batchnorm impl here, per-batch or running average?
         m.weight.data.normal_(1.0, 0.02)
         m.bias.data.fill_(0)
 
-# if opt.noBN:
-#     netG = dcgan.DCGAN_G_nobn(opt.imageSize, nz, nc, ngf, ngpu, n_extra_layers)
-# elif opt.mlp_G:
-#     netG = mlp.MLP_G(opt.imageSize, nz, nc, ngf, ngpu)
-# else:
-
-netG = dcgan.DCGAN_G(opt.imageSize, nz, nc, ngf, ngpu)
+if opt.noBN:
+    netG = dcgan.DCGAN_G_nobn(opt.imageSize, nz, nc, ngf, ngpu, n_extra_layers)
+elif opt.mlp_G:
+    netG = mlp.MLP_G(opt.imageSize, nz, nc, ngf, ngpu)
+else:
+    netG = dcgan.DCGAN_G(opt.imageSize, nz, nc, ngf, ngpu)
 netG.apply(weights_init)
-if opt.netG != '': # load checkpoint if needed
+if opt.netG != '':
     netG.load_state_dict(torch.load(opt.netG))
 print(netG)
 
-# if opt.mlp_D:
-#     netD = mlp.MLP_D(opt.imageSize, nz, nc, ndf, ngpu)
-# else:
-
-netD = dcgan.DCGAN_D(opt.imageSize, nz, nc, ndf, ngpu)
+netD = dcgan.DCGAN_D_nobn(opt.imageSize, nc, ndf, ngpu)
 netD.apply(weights_init)
-if opt.netD != '': # load checkpoint
+if opt.netD != '':
     netD.load_state_dict(torch.load(opt.netD))
 print(netD)
 
@@ -213,18 +208,11 @@ for epoch in range(opt.nepoch):
             fake = netG(noise)
             errG = netD(fake)
             if errG.data[0] < errD_real.data[0]:
-                # print(i)
-                # print('real energy: %s, fake energy %s' %
-                #       (errG.data[0], errD_real.data[0]))
                 cd_steps[b] = i
                 break
             errG.backward(one)
             optimizerG.step()
         loss_g[b] = errG.data[0]
-
-        # print(i)
-        # vutils.save_image(
-        #     fake.data, '{0}/neg_chain_{1}.png'.format(opt.experiment, b), nrow=10)
 
         # update D network, constrastive bp
         for p in netD.parameters(): # reset requires_grad
@@ -233,7 +221,7 @@ for epoch in range(opt.nepoch):
         # train with fake
         # noise.data.resize_(batch_size, nz, 1, 1)
         # noise.data.normal_(0, 1)
-        fake = netG(noise)
+        # fake = netG(noise)
         input.data.copy_(fake.data)
         errD_fake = netD(input)
         errD_fake.backward(mone)
@@ -258,7 +246,7 @@ for epoch in range(opt.nepoch):
         fake.data, '{0}/fake_samples_{1}.png'.format(opt.experiment, epoch), nrow=10)
 
     # do checkpointing
-    if (epoch+1) % 5 == 0:
+    if (epoch+1) % 100 == 0:
         torch.save(netG.state_dict(),
                    '{0}/netG_epoch_{1}.pth'.format(opt.experiment, epoch+1))
         torch.save(netD.state_dict(),
