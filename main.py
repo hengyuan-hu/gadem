@@ -5,6 +5,7 @@ import os
 import argparse
 import random
 import torch
+import numpy as np
 # import torch.nn as nn
 # import torch.nn.parallel
 import torch.backends.cudnn as cudnn
@@ -16,11 +17,12 @@ import torch.backends.cudnn as cudnn
 # from torch.autograd import Variable
 # import numpy as np
 
-import models.dcgan as dcgan
+# import models.dcgan as dcgan
 # import models.mlp as mlp
 
 from dataset_wrapper import Cifar10Wrapper
-from dem import DEM, Sampler
+from dem import DEM
+from sampler import Sampler
 
 
 parser = argparse.ArgumentParser()
@@ -44,26 +46,19 @@ parser.add_argument('--lr_f', type=float, default=0.00005,
                     help='learning rate for Critic, default=0.00005')
 parser.add_argument('--lr_g', type=float, default=0.00005,
                     help='learning rate for Generator, default=0.00005')
-parser.add_argument('--use_lmc', action='store_true', help='use adv examples')
-parser.add_argument('--lmc_grad_scale', type=float, default=0.1)
-parser.add_argument('--lmc_noise_scale', type=float, default=0.001)
+# parser.add_argument('--use_lmc', action='store_true', help='use adv examples')
+# parser.add_argument('--lmc_grad_scale', type=float, default=0.1)
+# parser.add_argument('--lmc_noise_scale', type=float, default=0.001)
 parser.add_argument('--ngpu', type=int, default=1, help='number of GPUs to use')
 parser.add_argument('--net_g', default='', help="path to net_g")
+parser.add_argument('--net_e', default='', help="path to net_e")
 parser.add_argument('--net_f', default='', help="path to net_f")
-parser.add_argument('--use_adv', action='store_true', help='use adv examples')
-parser.add_argument('--adv_eps', type=float, default=0.01)
+parser.add_argument('--avg_fe_decay', type=float, default=0.9)
+# parser.add_argument('--use_adv', action='store_true', help='use adv examples')
+# parser.add_argument('--adv_eps', type=float, default=0.01,
+#                     help='eps used in generating adv samples')
 parser.add_argument('--experiment', default=None,
                     help='Where to store samples and models')
-
-
-def weights_init(m):
-    """custom weights initialization called on net_g and net_f."""
-    classname = m.__class__.__name__
-    if classname.find('Conv') != -1:
-        m.weight.data.normal_(0.0, 0.02)
-    elif classname.find('BatchNorm') != -1:
-        m.weight.data.normal_(1.0, 0.02)
-        m.bias.data.fill_(0)
 
 
 if __name__ == '__main__':
@@ -72,7 +67,8 @@ if __name__ == '__main__':
     print(opt)
 
     random.seed(opt.manualSeed)
-    torch.manual_seed(opt.manualSeed)
+    torch.cuda.manual_seed(opt.manualSeed)
+    torch.cuda.manual_seed(opt.manualSeed)
 
     assert opt.experiment is not None, 'specify output dir to avoid overwriting.'
     if not os.path.exists(opt.experiment):
@@ -82,31 +78,14 @@ if __name__ == '__main__':
     cudnn.benchmark = True
 
     dataset = Cifar10Wrapper.load_default(opt.batch_size)
+    dem = DEM(opt)
+    sampler = Sampler(opt)
+    print(dem.net_f)
+    print(sampler.net_g)
+    print(sampler.net_e)
 
-    # this is tricky, use bn is bad?
-    net_f = dcgan.DCGAN_D_nobn(opt.image_size, opt.nz, opt.nc, opt.ndf, opt.ngpu)
-    if opt.net_f:
-        net_f.load_state_dict(torch.load(opt.net_f))
-    else:
-        net_f.apply(weights_init)
-    print(net_f)
-
-    net_g = dcgan.DCGAN_G(opt.image_size, opt.nz, opt.nc, opt.ngf, opt.ngpu)
-    if opt.net_g:
-        net_g.load_state_dict(torch.load(opt.net_g))
-    else:
-        net_g.apply(weights_init)
-    print(net_g)
-
-    net_f.cuda()
-    net_g.cuda()
-
-    dem = DEM(net_f)
-    sampler = Sampler(net_g, opt, dataset.x_shape)
-
-    opt.pcd_k = 25
-
-    if opt.net_f and opt.net_g:
-        dem.eval(dataset.train_xs, dataset.test_xs)
-
+    opt.max_steps = 25
     dem.train(opt, dataset, sampler)
+
+    # if opt.net_f and opt.net_g:
+    #     dem.eval(dataset.train_xs, dataset.test_xs)
